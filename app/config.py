@@ -15,6 +15,7 @@ Why a class instead of plain os.environ calls?
 
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -69,6 +70,44 @@ class Settings(BaseSettings):
     # Used to build the shareable link that is returned when a secret is made.
     public_base_url: str = "http://localhost:8000"
     app_name: str = "One-Time Secret Sharing Service"
+
+    @field_validator("database_url")
+    @classmethod
+    def normalise_database_url(cls, url: str) -> str:
+        """
+        Accept the connection URL in whichever form the host hands it to us.
+
+        This exists because of a specific, very common deployment failure.
+        Render (and Heroku) give you a database URL starting with the legacy
+        `postgres://` scheme:
+
+            postgres://user:password@host:5432/dbname
+
+        SQLAlchemy 2.0 does not recognise `postgres://` as a dialect and
+        refuses to start:
+
+            NoSuchModuleError: Can't load plugin: sqlalchemy.dialects:postgres
+
+        So a blueprint that wires DATABASE_URL straight from the managed
+        database would crash the app on boot. Rather than making that a manual
+        step you have to remember, we normalise it here:
+
+            postgres://...              ->  postgresql+psycopg2://...
+            postgresql://...            ->  postgresql+psycopg2://...
+            postgresql+psycopg2://...   ->  unchanged
+            sqlite://...                ->  unchanged
+
+        Naming the driver explicitly also stops SQLAlchemy from guessing a
+        default that might differ between versions.
+        """
+        if url.startswith("postgres://"):
+            return "postgresql+psycopg2://" + url[len("postgres://") :]
+
+        # Already a postgresql URL, but with no driver named after the "+".
+        if url.startswith("postgresql://"):
+            return "postgresql+psycopg2://" + url[len("postgresql://") :]
+
+        return url
 
 
 @lru_cache

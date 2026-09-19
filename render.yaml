@@ -28,6 +28,12 @@ services:
     envVars:
       # Pulled automatically from the database defined at the bottom of this
       # file, so the URL never has to be copied by hand.
+      #
+      # Render hands this over using the legacy `postgres://` scheme, which
+      # SQLAlchemy 2.0 refuses to load ("Can't load plugin:
+      # sqlalchemy.dialects:postgres"). app/config.py rewrites it to
+      # postgresql+psycopg2:// on the way in, so no manual fixing is needed
+      # here -- see normalise_database_url().
       - key: DATABASE_URL
         fromDatabase:
           name: secretshare-db
@@ -53,6 +59,9 @@ services:
       - key: PUBLIC_BASE_URL
         sync: false
 
+      # If the very first build fails with a "version not found" error, this
+      # is the line to change -- Render only offers specific patch releases.
+      # Any 3.11+ version works; nothing here depends on 3.13.
       - key: PYTHON_VERSION
         value: "3.13.1"
 

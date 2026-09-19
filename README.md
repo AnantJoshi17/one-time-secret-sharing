@@ -430,7 +430,7 @@ pytest
 By default the suite runs against a local SQLite file, so it works before you
 have PostgreSQL set up. **Run it against PostgreSQL too** — that is the real
 target, and it is where the concurrency test exercises genuine row-level
-locking. All 78 tests pass on both backends (verified on PostgreSQL 16.15):
+locking. All 83 tests pass on both backends (verified on PostgreSQL 16.15):
 
 ```bash
 TEST_DATABASE_URL="postgresql+psycopg2://secretshare:secretshare@localhost:5432/secretshare_test" pytest
@@ -441,7 +441,7 @@ pytest tests/test_secrets_single_read.py -v   # the single-read guarantees
 pytest -k "concurrent" -v                     # just the race-condition test
 ```
 
-78 tests across seven files:
+83 tests across eight files:
 
 | File | Covers |
 |------|--------|
@@ -452,6 +452,7 @@ pytest -k "concurrent" -v                     # just the race-condition test
 | `test_rate_limit.py` | the sliding window, and that it is wired to the endpoint |
 | `test_audit.py` | what gets logged, and that the log leaks nothing |
 | `test_frontend.py` | the pages are served, and loading a share link never consumes it |
+| `test_config.py` | the `postgres://` → `postgresql+psycopg2://` rewrite that keeps Render working |
 
 ---
 
@@ -542,8 +543,11 @@ All endpoints except `/`, `/health` and `/maintenance/cleanup` require
    - Start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
    - Health check path: `/health`
 3. Add the environment variables from `.env.example`. For `DATABASE_URL`, paste
-   the Internal Database URL but **change the `postgres://` prefix to
-   `postgresql+psycopg2://`** — SQLAlchemy needs the driver named.
+   the Internal Database URL as-is — Render gives it to you with a legacy
+   `postgres://` prefix, and `app/config.py` rewrites that to
+   `postgresql+psycopg2://` for you. (Without that rewrite, SQLAlchemy 2.0
+   refuses to start with `Can't load plugin: sqlalchemy.dialects:postgres` —
+   it is the single most common way this deploy fails.)
 
 ### Things that will bite you on the free tier
 
@@ -556,6 +560,9 @@ All endpoints except `/`, `/health` and `/maintenance/cleanup` require
 - **Free databases expire after 30 days.** Fine for a portfolio demo; note it
   if you show this to anyone.
 - **The rate limiter resets on every deploy**, because it lives in memory.
+- **If the first build fails on the Python version**, change `PYTHON_VERSION`
+  in `render.yaml`. Render only offers specific patch releases, and nothing in
+  this project needs anything newer than 3.11.
 
 ### Driving the cleanup endpoint
 
@@ -726,7 +733,7 @@ alembic/
   env.py             reads DATABASE_URL from app.config
   versions/0001_initial_schema.py
 
-tests/               78 tests, see the table above
+tests/               83 tests, see the table above
 NOTES.md             plain-English walkthrough of every module
 ```
 
