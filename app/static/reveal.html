@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reveal a secret</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Someone shared a secret with you</h1>
+    <p>It can be read once. After that it is destroyed.</p>
+  </header>
+
+  <!-- Reading a secret needs an account, because the team access check has to
+       know who is asking. So an unauthenticated visitor gets the login form
+       first, and the page continues once they have a token. -->
+  <section class="panel hidden" id="auth-panel">
+    <h2>Sign in to continue</h2>
+    <p class="muted" style="margin-top:0;">
+      Reading a secret requires an account, so we can check you are allowed to
+      see this one.
+    </p>
+    <div id="auth-forms"></div>
+  </section>
+
+  <section class="panel hidden" id="status-panel">
+    <div class="message hidden" id="status-message"></div>
+
+    <!-- Metadata, loaded with a plain GET. This does NOT consume the secret. -->
+    <div id="details" class="hidden">
+      <p class="muted" style="margin-top:0;">
+        <strong id="detail-label"></strong><br>
+        <span id="detail-expiry"></span>
+      </p>
+
+      <div class="message warn">
+        Clicking below reveals the secret <strong>once</strong> and destroys it.
+        Make sure you can save it now.
+      </div>
+
+      <button type="button" class="big" id="reveal-button">Reveal the secret</button>
+    </div>
+  </section>
+
+  <!-- The plaintext, shown exactly once. -->
+  <section class="panel hidden" id="revealed-panel">
+    <h2>Here it is</h2>
+    <div class="message warn">
+      This is the only time it will ever be shown. The copy on the server is
+      already gone.
+    </div>
+    <p class="secret-value" id="secret-value"></p>
+    <div class="row">
+      <button type="button" id="copy-secret">Copy to clipboard</button>
+      <a href="/"><button type="button" class="secondary">Done</button></a>
+    </div>
+  </section>
+
+  <footer>
+    <a href="/">Create your own one-time secret</a>
+  </footer>
+</div>
+
+<script src="/static/api.js"></script>
+<script>
+/* ---------------------------------------------------------------------------
+   The reveal landing page.
+
+   This page is the reason the API splits GET from POST.
+
+   Loading this page runs a GET, which only reads metadata and is safe to
+   repeat -- so a link preview bot, a browser prefetch or a mail scanner
+   following the URL does NOT destroy the secret. Only pressing the button
+   sends the POST that consumes it.
+
+   If revealing happened on page load, pasting your own share link into Slack
+   would burn the secret before the recipient ever clicked.
+   --------------------------------------------------------------------------- */
+
+const authPanel     = document.getElementById("auth-panel");
+const statusPanel   = document.getElementById("status-panel");
+const statusMessage = document.getElementById("status-message");
+const detailsBox    = document.getElementById("details");
+const revealedPanel = document.getElementById("revealed-panel");
+
+/* The URL is /s/<token>. The server serves this same HTML for any token and
+   does not look at it -- the page reads it from the path and asks the API. */
+const token = decodeURIComponent(window.location.pathname.split("/s/")[1] || "");
+
+async function render() {
+  if (!token) {
+    show(statusPanel);
+    setMessage(statusMessage, "This link is missing its token.");
+    return;
+  }
+
+  if (!isLoggedIn()) {
+    show(authPanel);
+    hide(statusPanel);
+    renderAuthPanel(document.getElementById("auth-forms"), render);
+    return;
+  }
+
+  hide(authPanel);
+  show(statusPanel);
+  await loadMetadata();
+}
+
+/** Ask whether the link is still good. A safe, repeatable GET. */
+async function loadMetadata() {
+  setMessage(statusMessage, null);
+  hide(detailsBox);
+
+  try {
+    const meta = await api(`/secrets/${encodeURIComponent(token)}`);
+
+    if (!meta.is_available) {
+      // Already used, or expired. Say which.
+      setMessage(
+        statusMessage,
+        meta.viewed
+          ? "This secret has already been viewed. It no longer exists."
+          : "This secret expired before it was read. It no longer exists.",
+        "error"
+      );
+      return;
+    }
+
+    document.getElementById("detail-label").textContent = meta.label || "Untitled secret";
+    document.getElementById("detail-expiry").textContent =
+      `Expires ${relativeTime(meta.expires_at)} — ${formatTime(meta.expires_at)}`;
+
+    show(detailsBox);
+  } catch (error) {
+    if (error.status === 401) {
+      // The token expired between page load and now.
+      render();
+      return;
+    }
+    // 404 covers both "no such secret" and "you are not allowed to see this
+    // one" -- the API deliberately does not distinguish them, so that a
+    // stranger cannot use it to confirm a guessed token is real.
+    setMessage(
+      statusMessage,
+      error.status === 404
+        ? "This link is not valid, or it was not shared with you."
+        : error.detail || "Could not load this secret.",
+      "error"
+    );
+  }
+}
+
+/** The destructive step. Only ever triggered by a real click. */
+document.getElementById("reveal-button").addEventListener("click", async (event) => {
+  const button = event.target;
+  button.disabled = true;
+  button.textContent = "Revealing…";
+  setMessage(statusMessage, null);
+
+  try {
+    const revealed = await api(`/secrets/${encodeURIComponent(token)}/reveal`, {
+      method: "POST",
+    });
+
+    // textContent, not innerHTML: the secret is arbitrary user input and must
+    // never be parsed as HTML.
+    document.getElementById("secret-value").textContent = revealed.plaintext;
+
+    hide(statusPanel);
+    show(revealedPanel);
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = "Reveal the secret";
+
+    if (error.status === 410) {
+      // Someone else got there first, or it expired in the meantime. This is
+      // the atomic UPDATE doing its job: their claim matched the row, ours
+      // matched zero rows.
+      hide(detailsBox);
+      setMessage(statusMessage, error.detail, "error");
+    } else {
+      setMessage(statusMessage, error.detail || "Could not reveal the secret.", "error");
+    }
+  }
+});
+
+document.getElementById("copy-secret").addEventListener("click", (event) => {
+  copyToClipboard(document.getElementById("secret-value").textContent, event.target);
+});
+
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>One-Time Secret Sharing</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>One-Time Secret Sharing</h1>
+    <p>Share a password or API key through a link that works exactly once.</p>
+  </header>
+
+  <!-- Shown when nobody is logged in. Filled in by renderAuthPanel(). -->
+  <section class="panel hidden" id="auth-panel">
+    <h2>Sign in</h2>
+    <div id="auth-forms"></div>
+  </section>
+
+  <!-- Everything below is shown only once you have a token. -->
+  <div id="app" class="hidden">
+
+    <section class="panel">
+      <div class="row" style="justify-content: space-between;">
+        <div>
+          <strong id="current-email"></strong>
+          <div class="muted" id="team-status">Not in a team</div>
+        </div>
+        <button type="button" class="secondary" id="logout">Log out</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Create a secret</h2>
+      <div class="message hidden" id="create-message"></div>
+
+      <form id="create-form">
+        <label>
+          <span>Secret <span class="hint">encrypted before it is stored</span></span>
+          <textarea name="plaintext" required placeholder="the password, API key or note"></textarea>
+        </label>
+        <label>
+          <span>Label <span class="hint">optional, stored unencrypted &mdash; never put the secret here</span></span>
+          <input type="text" name="label" maxlength="120" placeholder="e.g. prod database password">
+        </label>
+        <label>
+          <span>Expires after <span class="hint">minutes</span></span>
+          <input type="number" name="ttl_minutes" min="1" value="60">
+        </label>
+        <button type="submit" id="create-submit">Create link</button>
+      </form>
+
+      <!-- The created link. Shown once, after a successful create. -->
+      <div id="created" class="hidden" style="margin-top: 1.25rem;">
+        <div class="message warn">
+          This link works <strong>once</strong>. Whoever opens it first gets the
+          secret, and it is destroyed immediately after.
+        </div>
+        <p class="share-link" id="share-url"></p>
+        <div class="row">
+          <button type="button" id="copy-link">Copy link</button>
+          <button type="button" class="secondary" id="open-link">Open it</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Your team</h2>
+      <div class="message hidden" id="team-message"></div>
+
+      <!-- Shown when you are not in a team yet. -->
+      <div id="team-none">
+        <p class="muted">
+          Team members can read secrets created inside the team. You can create
+          one, or join an existing team with its invite code.
+        </p>
+        <form id="create-team-form" class="row" style="margin-bottom:.75rem;">
+          <input type="text" name="name" placeholder="Team name" required style="flex:1;">
+          <button type="submit">Create team</button>
+        </form>
+        <form id="join-team-form" class="row">
+          <input type="text" name="invite_code" placeholder="Invite code" required style="flex:1;">
+          <button type="submit" class="secondary">Join team</button>
+        </form>
+      </div>
+
+      <!-- Shown when you are in one. -->
+      <div id="team-detail" class="hidden">
+        <p style="margin-top:0;"><strong id="team-name"></strong></p>
+        <p class="muted">Members: <span id="team-members"></span></p>
+        <p class="muted">
+          Invite code:
+          <code id="team-invite"></code>
+          <button type="button" class="secondary" id="copy-invite"
+                  style="padding:.2rem .5rem; font-size:.78rem;">Copy</button>
+        </p>
+        <button type="button" class="secondary" id="leave-team">Leave team</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Secrets you can see</h2>
+      <p class="muted" style="margin-top:0;">
+        Your own, plus your team's. Metadata only &mdash; listing a secret never
+        reveals it.
+      </p>
+      <div id="secrets-list"></div>
+    </section>
+
+  </div>
+
+  <footer>
+    <a href="/docs">API documentation</a>
+  </footer>
+</div>
+
+<script src="/static/api.js"></script>
+<script>
+/* ---------------------------------------------------------------------------
+   Home page: sign in, create secrets, manage your team, list what you can see.
+   --------------------------------------------------------------------------- */
+
+const authPanel     = document.getElementById("auth-panel");
+const appPanel      = document.getElementById("app");
+const createMessage = document.getElementById("create-message");
+const teamMessage   = document.getElementById("team-message");
+
+/** Decide which half of the page to show, then load the data for it. */
+async function render() {
+  if (!isLoggedIn()) {
+    show(authPanel);
+    hide(appPanel);
+    renderAuthPanel(document.getElementById("auth-forms"), render);
+    return;
+  }
+
+  try {
+    // Confirms the stored token is still valid. If it is not, api() clears it
+    // and throws, and we fall through to showing the login form again.
+    const me = await api("/auth/me");
+    document.getElementById("current-email").textContent = me.email;
+
+    hide(authPanel);
+    show(appPanel);
+
+    await Promise.all([loadTeam(), loadSecrets()]);
+  } catch {
+    show(authPanel);
+    hide(appPanel);
+    renderAuthPanel(document.getElementById("auth-forms"), render);
+  }
+}
+
+/* -- Creating a secret --------------------------------------------------- */
+document.getElementById("create-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.target;
+  const button = document.getElementById("create-submit");
+
+  setMessage(createMessage, null);
+  hide(document.getElementById("created"));
+  button.disabled = true;
+
+  // Only send a label if one was typed -- the API expects null, not "".
+  const payload = {
+    plaintext: form.plaintext.value,
+    label: form.label.value.trim() || null,
+    ttl_minutes: Number(form.ttl_minutes.value) || null,
+  };
+
+  try {
+    const created = await api("/secrets", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+
+    document.getElementById("share-url").textContent = created.share_url;
+    show(document.getElementById("created"));
+    form.reset();
+    form.ttl_minutes.value = 60;
+
+    await loadSecrets();
+  } catch (error) {
+    // 429 is the rate limiter; its message already says how long to wait.
+    setMessage(createMessage, error.detail || "Could not create the secret");
+  } finally {
+    button.disabled = false;
+  }
+});
+
+document.getElementById("copy-link").addEventListener("click", (event) => {
+  copyToClipboard(document.getElementById("share-url").textContent, event.target);
+});
+
+document.getElementById("open-link").addEventListener("click", () => {
+  window.location.href = document.getElementById("share-url").textContent;
+});
+
+/* -- Teams ---------------------------------------------------------------- */
+async function loadTeam() {
+  const none   = document.getElementById("team-none");
+  const detail = document.getElementById("team-detail");
+
+  try {
+    const team = await api("/teams/me");
+
+    document.getElementById("team-name").textContent = team.name;
+    document.getElementById("team-members").textContent =
+      team.members.map((m) => m.email).join(", ");
+    document.getElementById("team-invite").textContent = team.invite_code;
+    document.getElementById("team-status").textContent = `Team: ${team.name}`;
+
+    hide(none);
+    show(detail);
+  } catch (error) {
+    // 404 simply means "not in a team", which is a normal state, not an error.
+    if (error.status !== 404) {
+      setMessage(teamMessage, error.detail);
+    }
+    document.getElementById("team-status").textContent = "Not in a team";
+    show(none);
+    hide(detail);
+  }
+}
+
+document.getElementById("create-team-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  setMessage(teamMessage, null);
+  try {
+    await api("/teams", {
+      method: "POST",
+      body: JSON.stringify({ name: event.target.name.value.trim() }),
+    });
+    event.target.reset();
+    await Promise.all([loadTeam(), loadSecrets()]);
+  } catch (error) {
+    setMessage(teamMessage, error.detail);
+  }
+});
+
+document.getElementById("join-team-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  setMessage(teamMessage, null);
+  try {
+    await api("/teams/join", {
+      method: "POST",
+      body: JSON.stringify({ invite_code: event.target.invite_code.value.trim() }),
+    });
+    event.target.reset();
+    await Promise.all([loadTeam(), loadSecrets()]);
+  } catch (error) {
+    setMessage(teamMessage, error.detail);
+  }
+});
+
+document.getElementById("leave-team").addEventListener("click", async () => {
+  setMessage(teamMessage, null);
+  try {
+    await api("/teams/leave", { method: "POST" });
+    await Promise.all([loadTeam(), loadSecrets()]);
+  } catch (error) {
+    setMessage(teamMessage, error.detail);
+  }
+});
+
+document.getElementById("copy-invite").addEventListener("click", (event) => {
+  copyToClipboard(document.getElementById("team-invite").textContent, event.target);
+});
+
+/* -- Listing -------------------------------------------------------------- */
+async function loadSecrets() {
+  const container = document.getElementById("secrets-list");
+
+  try {
+    const secrets = await api("/secrets");
+
+    if (secrets.length === 0) {
+      container.innerHTML = '<p class="muted">Nothing yet.</p>';
+      return;
+    }
+
+    const rows = secrets.map((secret) => {
+      const status = secret.is_available
+        ? '<span class="badge available">available</span>'
+        : `<span class="badge gone">${secret.viewed ? "viewed" : "expired"}</span>`;
+
+      // textContent-style escaping: the label is user input, so it must not be
+      // interpolated into HTML raw or a label like "<img onerror=...>" would
+      // execute. escapeHtml() below does that.
+      return `
+        <tr>
+          <td>${escapeHtml(secret.label || "—")}</td>
+          <td class="token">${escapeHtml(secret.token.slice(0, 12))}…</td>
+          <td>${status}</td>
+          <td class="muted">${secret.is_expired ? "expired" : relativeTime(secret.expires_at)}</td>
+        </tr>`;
+    });
+
+    container.innerHTML = `
+      <table>
+        <thead><tr><th>Label</th><th>Token</th><th>Status</th><th>Expires</th></tr></thead>
+        <tbody>${rows.join("")}</tbody>
+      </table>`;
+  } catch (error) {
+    container.innerHTML = `<p class="muted">${escapeHtml(error.detail || "Could not load")}</p>`;
+  }
+}
+
+/** Escape user-supplied text before putting it into innerHTML. */
+function escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+/* -- Session -------------------------------------------------------------- */
+document.getElementById("logout").addEventListener("click", () => {
+  clearToken();
+  render();
+});
+
+render();
+</script>
+</body>
+</html>
