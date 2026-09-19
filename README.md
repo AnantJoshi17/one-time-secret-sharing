@@ -430,7 +430,7 @@ pytest
 By default the suite runs against a local SQLite file, so it works before you
 have PostgreSQL set up. **Run it against PostgreSQL too** — that is the real
 target, and it is where the concurrency test exercises genuine row-level
-locking. All 83 tests pass on both backends (verified on PostgreSQL 16.15):
+locking. All 90 tests pass on both backends (verified on PostgreSQL 16.15):
 
 ```bash
 TEST_DATABASE_URL="postgresql+psycopg2://secretshare:secretshare@localhost:5432/secretshare_test" pytest
@@ -441,7 +441,7 @@ pytest tests/test_secrets_single_read.py -v   # the single-read guarantees
 pytest -k "concurrent" -v                     # just the race-condition test
 ```
 
-83 tests across eight files:
+90 tests across eight files:
 
 | File | Covers |
 |------|--------|
@@ -452,7 +452,7 @@ pytest -k "concurrent" -v                     # just the race-condition test
 | `test_rate_limit.py` | the sliding window, and that it is wired to the endpoint |
 | `test_audit.py` | what gets logged, and that the log leaks nothing |
 | `test_frontend.py` | the pages are served, and loading a share link never consumes it |
-| `test_config.py` | the `postgres://` → `postgresql+psycopg2://` rewrite that keeps Render working |
+| `test_config.py` | env var normalisation: the `postgres://` rewrite, and stripping whitespace from pasted values |
 
 ---
 
@@ -733,7 +733,7 @@ alembic/
   env.py             reads DATABASE_URL from app.config
   versions/0001_initial_schema.py
 
-tests/               83 tests, see the table above
+tests/               90 tests, see the table above
 NOTES.md             plain-English walkthrough of every module
 ```
 

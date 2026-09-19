@@ -109,6 +109,41 @@ class Settings(BaseSettings):
 
         return url
 
+    @field_validator(
+        "public_base_url", "cleanup_token", "jwt_secret_key", "database_url"
+    )
+    @classmethod
+    def strip_whitespace(cls, value: str) -> str:
+        """
+        Strip surrounding whitespace from values that get pasted by hand.
+
+        This is not defensive programming for its own sake -- it fixes a real
+        bug we hit on the first deploy. Render's dashboard renders environment
+        variable values as a multi-line text box, so pasting a URL into it
+        captures a trailing newline. That produced share links like:
+
+            https://your-app.onrender.com\n/s/abc123
+
+        which are broken, and in a way that is genuinely hard to spot because
+        the newline is invisible in most output.
+
+        The same hazard applies to CLEANUP_TOKEN (a stray newline would make
+        every cleanup call 401) and to DATABASE_URL (a newline would make the
+        host unresolvable). Cheaper to strip once here than to debug later.
+        """
+        return value.strip()
+
+    @field_validator("public_base_url")
+    @classmethod
+    def strip_trailing_slash(cls, value: str) -> str:
+        """
+        Normalise the base URL so links are built consistently.
+
+        Both "https://x.com" and "https://x.com/" must produce
+        "https://x.com/s/token", never "https://x.com//s/token".
+        """
+        return value.rstrip("/")
+
 
 @lru_cache
 def get_settings() -> Settings:

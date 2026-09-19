@@ -164,7 +164,10 @@ def create_secret(
         # Points at the browser landing page (/s/<token>), not at the API
         # path. Opening it runs a safe GET that only shows metadata; the
         # secret is consumed only when the reader presses the button there.
-        share_url=f"{settings.public_base_url.rstrip('/')}/s/{secret.token}",
+        #
+        # public_base_url is already stripped of whitespace and any trailing
+        # slash by the Settings validators, so this is a plain join.
+        share_url=f"{settings.public_base_url}/s/{secret.token}",
         label=secret.label,
         expires_at=ensure_utc(secret.expires_at),
         team_id=secret.team_id,

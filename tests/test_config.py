@@ -56,3 +56,45 @@ def test_a_normalised_url_is_one_sqlalchemy_can_actually_load():
 
     assert engine.dialect.name == "postgresql"
     assert engine.dialect.driver == "psycopg2"
+
+
+@pytest.mark.parametrize(
+    "given, expected",
+    [
+        # The exact bug hit on the first Render deploy: the dashboard renders
+        # env var values as a text box, so pasting a URL captures a newline.
+        ("https://app.onrender.com\n", "https://app.onrender.com"),
+        ("  https://app.onrender.com  ", "https://app.onrender.com"),
+        # A trailing slash must not produce a double slash in share links.
+        ("https://app.onrender.com/", "https://app.onrender.com"),
+        ("https://app.onrender.com/\n", "https://app.onrender.com"),
+        ("https://app.onrender.com", "https://app.onrender.com"),
+    ],
+)
+def test_public_base_url_is_normalised(given: str, expected: str):
+    settings = Settings(public_base_url=given, secret_encryption_key="x")
+
+    assert settings.public_base_url == expected
+
+
+def test_share_links_are_well_formed_after_normalisation():
+    """The end the bug actually showed up at: the generated link."""
+    settings = Settings(
+        public_base_url="https://app.onrender.com\n", secret_encryption_key="x"
+    )
+
+    link = f"{settings.public_base_url}/s/abc123"
+
+    assert link == "https://app.onrender.com/s/abc123"
+    assert "\n" not in link
+    assert "//s/" not in link
+
+
+def test_a_pasted_cleanup_token_still_matches():
+    """
+    A trailing newline on CLEANUP_TOKEN would make every cleanup call 401,
+    with no clue as to why.
+    """
+    settings = Settings(cleanup_token="secret-token\n", secret_encryption_key="x")
+
+    assert settings.cleanup_token == "secret-token"
