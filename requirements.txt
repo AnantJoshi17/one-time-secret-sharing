@@ -1,0 +1,35 @@
+# ---------------------------------------------------------------------------
+# Runtime dependencies
+# ---------------------------------------------------------------------------
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+
+# Database: SQLAlchemy is the ORM, psycopg2-binary is the PostgreSQL driver.
+# "binary" means it ships pre-compiled, so you do not need a C compiler.
+SQLAlchemy==2.0.36
+psycopg2-binary==2.9.10
+alembic==1.14.0
+
+# Validation and settings. pydantic-settings reads the .env file for us.
+pydantic==2.10.4
+pydantic-settings==2.7.0
+email-validator==2.2.0
+
+# Auth. passlib does the password hashing, PyJWT signs/verifies the tokens.
+# bcrypt is pinned to 4.0.1 because passlib 1.7.4 is not compatible with the
+# 4.1+ releases (it crashes reading bcrypt.__about__ at import time).
+passlib==1.7.4
+bcrypt==4.0.1
+PyJWT==2.10.1
+
+# Fernet symmetric encryption for the secret payloads.
+cryptography==44.0.0
+
+# FastAPI needs this to parse the OAuth2 login form (application/x-www-form-urlencoded).
+python-multipart==0.0.20
+
+# ---------------------------------------------------------------------------
+# Test dependencies (kept in the same file to keep setup to a single command)
+# ---------------------------------------------------------------------------
+pytest==8.3.4
+httpx==0.28.1
